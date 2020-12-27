@@ -20,15 +20,18 @@
 #include "config_auto.h"
 #endif
 
+#include "pdf_ttf.h"
+#include "tprintf.h"
+
+#include <cmath>
+#include <cstring>
+#include <fstream> // for std::ifstream
 #include <locale>  // for std::locale::classic
 #include <memory>  // std::unique_ptr
 #include <sstream> // for std::stringstream
-#include "allheaders.h"
+#include <allheaders.h>
 #include <tesseract/baseapi.h>
-#include <cmath>
 #include <tesseract/renderer.h>
-#include <cstring>
-#include "tprintf.h"
 
 /*
 
@@ -623,24 +626,21 @@ bool TessPDFRenderer::BeginDocumentHandler() {
 
   stream.str("");
   stream << datadir_.c_str() << "/pdf.ttf";
-  FILE *fp = fopen(stream.str().c_str(), "rb");
-  if (!fp) {
-    tprintf("Cannot open file \"%s\"!\n", stream.str().c_str());
-    return false;
+  const uint8_t* font;
+  std::ifstream input(stream.str().c_str(), std::ios::in | std::ios::binary);
+  std::vector<unsigned char> buffer(std::istreambuf_iterator<char>(input), {});
+  auto size = buffer.size();
+  if (size) {
+    font = buffer.data();
+  } else {
+#if defined(DEBUG)
+    tprintf("Cannot open file \"%s\"!\nUsing internal glyphless font.\n",
+            stream.str().c_str());
+#endif
+    font = pdf_ttf;
+    size = sizeof(pdf_ttf);
   }
-  fseek(fp, 0, SEEK_END);
-  auto size = std::ftell(fp);
-  if (size < 0) {
-    fclose(fp);
-    return false;
-  }
-  fseek(fp, 0, SEEK_SET);
-  const std::unique_ptr<char[]> buffer(new char[size]);
-  if (!tesseract::DeSerialize(fp, buffer.get(), size)) {
-    fclose(fp);
-    return false;
-  }
-  fclose(fp);
+
   // FONTFILE2
   stream.str("");
   stream <<
@@ -652,7 +652,7 @@ bool TessPDFRenderer::BeginDocumentHandler() {
     "stream\n";
   AppendString(stream.str().c_str());
   objsize  = stream.str().size();
-  AppendData(buffer.get(), size);
+  AppendData(reinterpret_cast<const char*>(font), size);
   objsize += size;
   AppendString(endstream_endobj);
   objsize += strlen(endstream_endobj);
