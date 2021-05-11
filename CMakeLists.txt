@@ -112,41 +112,12 @@ endif()
 
 include(CheckCXXCompilerFlag)
 
-# Check for C++ standard to use
-get_property(known_features GLOBAL PROPERTY CMAKE_CXX_KNOWN_FEATURES)
-if (cxx_std_17 IN_LIST known_features)
-    set(CMAKE_CXX_STANDARD 17)
-elseif (cxx_std_14 IN_LIST known_features)
-    set(CMAKE_CXX_STANDARD 14)
-else()  # minimum required standard
-    set(CMAKE_CXX_STANDARD 11)
-endif()
-
-if ("${CMAKE_CXX17_STANDARD_COMPILE_OPTION}" STREQUAL "")
-    set(CMAKE_CXX_STANDARD 14)
-endif()
-if ("${CMAKE_CXX14_STANDARD_COMPILE_OPTION}" STREQUAL "")
-    set(CMAKE_CXX_STANDARD 11)
-endif()
-
-# Avoid using experimental c++1y (c++1z) standard even if the compiler announces cxx14 (cxx17)
-# in CMAKE_CXX_KNOWN_FEATURES and CMAKE_CXX_COMPILE_FEATURES
-# It is the case of clang 3.9, 4.0 (announces c++1z) and gcc 4.8 (announces c++1y)
-if ("${CMAKE_CXX17_STANDARD_COMPILE_OPTION}" STREQUAL "-std=c++1z")
-  set(CMAKE_CXX_STANDARD 14)
-endif()
-if ("${CMAKE_CXX14_STANDARD_COMPILE_OPTION}" STREQUAL "-std=c++1y")
-  set(CMAKE_CXX_STANDARD 11)
-endif()
-# temporarily
 set(CMAKE_CXX_STANDARD 17)
-
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-set(LIBRARY_TYPE SHARED)
-if (STATIC)
-    set(LIBRARY_TYPE)
+if (BUILD_SHARED_LIBS)
+    set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 endif()
 
 # LTO
@@ -161,9 +132,31 @@ endif()
 
 CHECK_CXX_COMPILER_FLAG("-march=native" COMPILER_SUPPORTS_MARCH_NATIVE)
 if(COMPILER_SUPPORTS_MARCH_NATIVE)
-    set(MARCH_NATIVE_FLAGS "${MARCH_NATIVE_FLAGS} -march=native -mtune=native")
+    set(MARCH_NATIVE_FLAGS "${MARCH_NATIVE_FLAGS} -march=native")
+    if(NOT CLANG AND MSVC)
+        # clang-cl does not know this argument
+        set(MARCH_NATIVE_FLAGS "${MARCH_NATIVE_FLAGS} -mtune=native")
+    endif()
     set(MARCH_NATIVE_OPT ON)
 endif()
+
+# Flags for SIMD support
+set(HAVE_AVX FALSE)
+set(HAVE_AVX2 FALSE)
+set(HAVE_FMA FALSE)
+set(HAVE_SSE4_1 FALSE)
+set(HAVE_NEON FALSE)
+
+if (CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64.*|AARCH64.*")
+ set(AARCH64 TRUE)
+endif()
+
+if(AARCH64)
+
+add_definitions("-DHAVE_NEON")
+set(HAVE_NEON TRUE)
+
+else()
 
 CHECK_CXX_COMPILER_FLAG("-mavx" HAVE_AVX)
 if(HAVE_AVX)
@@ -219,7 +212,19 @@ if(MSVC)
         set(HAVE_SSE4_1 ON)
         add_definitions("-DHAVE_SSE4_1")
     endif()
+    # clang with MSVC compatibility
+    if(CLANG)
+       set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-microsoft-unqualified-friend")
+       if(HAVE_FMA)
+           set(FMA_COMPILE_FLAGS "-mfma ${FMA_COMPILE_FLAGS}")
+       endif(HAVE_FMA)
+       if(HAVE_SSE4_1)
+           set(SSE4_1_COMPILE_FLAGS "-msse4.1 ${SSE4_1_COMPILE_FLAGS}")
+       endif(HAVE_SSE4_1)
+    endif(CLANG)
 endif(MSVC)
+
+endif(AARCH64)
 
 # auto optimize - used only for information about available vectors
 include(OptimizeForArchitecture)
@@ -239,13 +244,14 @@ if(CMAKE_COMPILER_IS_GNUCXX OR MINGW)
     set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -Wall -DDEBUG -pedantic -Og")
 elseif(MSVC)
     add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+    add_definitions(-D_CRT_NONSTDC_NO_DEPRECATE)  # strdup
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /utf-8")
     if (NOT CLANG)
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP")
     endif()
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /wd4244 /wd4305 /wd4267")
     # Don't use /Wall because it generates too many warnings.
-    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /W4 /bigobj")
+    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /W0 /bigobj")
     # MT flag
     if(WIN32_MT_BUILD)
         set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -283,7 +289,6 @@ if (OPENMP_BUILD)
     endif()
 endif()
 
-
 if (CYGWIN)
     add_definitions(-D__CYGWIN__)
 elseif(UNIX)
@@ -294,6 +299,8 @@ elseif(WIN32)
     set(LIB_Ws2_32 Ws2_32)
 endif()
 
+add_definitions("-DCMAKE_BUILD")
+
 ###############################################################################
 #
 # packages
@@ -302,10 +309,10 @@ endif()
 
 if (SW_BUILD)
     find_package(SW REQUIRED)
-    if (STATIC)
-        set(SW_BUILD_SHARED_LIBS 0)
-    else()
+    if (BUILD_SHARED_LIBS)
         set(SW_BUILD_SHARED_LIBS 1)
+    else()
+        set(SW_BUILD_SHARED_LIBS 0)
     endif()
     sw_add_package(
         org.sw.demo.danbloomberg.leptonica
@@ -330,7 +337,12 @@ else()
         message(FATAL_ERROR "Cannot find required library Leptonica. Quitting!")
     endif(NOT Leptonica_FOUND)
 
-    find_package(LibArchive)
+    # Check for optional libarchive.
+    if(PKG_CONFIG_EXECUTABLE)
+        pkg_check_modules(LibArchive libarchive)
+    else()
+        find_package(LibArchive)
+    endif()
     if(LibArchive_FOUND)
         set(HAVE_LIBARCHIVE ON)
     endif()
@@ -361,13 +373,14 @@ include(Configure)
 
 configure_file(${AUTOCONFIG_SRC} ${AUTOCONFIG} @ONLY)
 
-set(INCLUDE_DIR "${CMAKE_INSTALL_PREFIX}/include" "${CMAKE_INSTALL_PREFIX}/include/tesseract")
+set(INCLUDE_DIR "${CMAKE_INSTALL_PREFIX}/include")
 
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/include/tesseract/version.h.in
     ${CMAKE_CURRENT_BINARY_DIR}/include/tesseract/version.h @ONLY)
 
 include(CMakePackageConfigHelpers)
+include(GenerateExportHeader)
 configure_package_config_file(
     cmake/templates/TesseractConfig.cmake.in
     ${CMAKE_CURRENT_BINARY_DIR}/cmake/tesseract/TesseractConfig.cmake
@@ -501,7 +514,6 @@ if (DISABLED_LEGACY_ENGINE)
         src/classify/intproto.cpp
         src/classify/kdtree.cpp
         src/classify/mf.cpp
-        src/classify/mfdefs.cpp
         src/classify/mfoutline.cpp
         src/classify/mfx.cpp
         src/classify/normfeat.cpp
@@ -570,8 +582,10 @@ if(HAVE_SSE4_1)
 endif(HAVE_SSE4_1)
 if(HAVE_NEON)
    list(APPEND arch_files_opt src/arch/intsimdmatrixneon.cpp)
-   set_source_files_properties(src/arch/intsimdmatrixneon.cpp
-                               PROPERTIES COMPILE_FLAGS ${NEON_COMPILE_FLAGS})
+   if(NEON_COMPILE_FLAGS)
+       set_source_files_properties(src/arch/intsimdmatrixneon.cpp
+                                   PROPERTIES COMPILE_FLAGS ${NEON_COMPILE_FLAGS})
+   endif()
 endif(HAVE_NEON)
 
 file(GLOB_RECURSE tesseract_hdr
@@ -605,7 +619,7 @@ set(libtessfiles ${tesseract_src} ${arch_files} ${arch_files_opt} ${tesseract_hd
 
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${libtessfiles})
 
-add_library                     (libtesseract ${LIBRARY_TYPE} ${libtessfiles})
+add_library                     (libtesseract ${libtessfiles})
 target_include_directories      (libtesseract
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     PRIVATE src
@@ -624,12 +638,12 @@ target_include_directories      (libtesseract
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/wordrec>
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/training>
 )
-if (NOT STATIC)
+if (BUILD_SHARED_LIBS)
 target_compile_definitions      (libtesseract
     PRIVATE -DTESS_EXPORTS
     INTERFACE -DTESS_IMPORTS
 )
-set_target_properties           (libtesseract PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS True)
+#generate_export_header          (libtesseract EXPORT_MACRO_NAME TESS_API)
 endif()
 target_link_libraries           (libtesseract PRIVATE ${LIB_Ws2_32} ${LIB_pthread})
 if(OpenMP_CXX_FOUND)
@@ -700,27 +714,20 @@ install(EXPORT TesseractTargets NAMESPACE Tesseract:: DESTINATION lib/cmake/tess
 install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/cmake DESTINATION lib)
 
 install(FILES
-    # from api/makefile.am
-    include/tesseract/apitypes.h
     include/tesseract/baseapi.h
     include/tesseract/capi.h
     include/tesseract/renderer.h
     ${CMAKE_CURRENT_BINARY_DIR}/include/tesseract/version.h
 
-    #from ccmain/makefile.am
-    include/tesseract/thresholder.h
     include/tesseract/ltrresultiterator.h
     include/tesseract/pageiterator.h
     include/tesseract/resultiterator.h
     include/tesseract/osdetect.h
 
-    #from ccstruct/makefile.am
     include/tesseract/publictypes.h
 
-    #from ccutil/makefile.am
-    include/tesseract/helpers.h
     include/tesseract/ocrclass.h
-    include/tesseract/platform.h
+    include/tesseract/export.h
     include/tesseract/unichar.h
 
     #${CMAKE_CURRENT_BINARY_DIR}/src/endianness.h

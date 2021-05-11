@@ -16,18 +16,22 @@
  *
  **********************************************************************/
 
-#include "errcode.h"
-#include <tesseract/helpers.h>  // for ReverseN
 #include "serialis.h"
+
+#include "errcode.h"
+
+#include "helpers.h" // for ReverseN
+
+#include <climits> // for INT_MAX
 #include <cstdio>
 
 namespace tesseract {
 
 // The default FileReader loads the whole file into the vector of char,
 // returning false on error.
-bool LoadDataFromFile(const char* filename, std::vector<char>* data) {
+bool LoadDataFromFile(const char *filename, std::vector<char> *data) {
   bool result = false;
-  FILE* fp = fopen(filename, "rb");
+  FILE *fp = fopen(filename, "rb");
   if (fp != nullptr) {
     fseek(fp, 0, SEEK_END);
     auto size = std::ftell(fp);
@@ -46,179 +50,86 @@ bool LoadDataFromFile(const char* filename, std::vector<char>* data) {
 
 // The default FileWriter writes the vector of char to the filename file,
 // returning false on error.
-bool SaveDataToFile(const std::vector<char>& data, const char* filename) {
-  FILE* fp = fopen(filename, "wb");
+bool SaveDataToFile(const std::vector<char> &data, const char *filename) {
+  FILE *fp = fopen(filename, "wb");
   if (fp == nullptr) {
     return false;
   }
-  bool result =
-      static_cast<int>(fwrite(&data[0], 1, data.size(), fp)) == data.size();
+  bool result = static_cast<int>(fwrite(&data[0], 1, data.size(), fp)) == data.size();
   fclose(fp);
   return result;
 }
 
-bool DeSerialize(FILE* fp, char* data, size_t n) {
-  return fread(data, sizeof(*data), n, fp) == n;
-}
-
-bool DeSerialize(FILE* fp, float* data, size_t n) {
-  return fread(data, sizeof(*data), n, fp) == n;
-}
-
-bool DeSerialize(FILE* fp, int8_t* data, size_t n) {
-  return fread(data, sizeof(*data), n, fp) == n;
-}
-
-bool DeSerialize(FILE* fp, int16_t* data, size_t n) {
-  return fread(data, sizeof(*data), n, fp) == n;
-}
-
-bool DeSerialize(FILE* fp, int32_t* data, size_t n) {
-  return fread(data, sizeof(*data), n, fp) == n;
-}
-
-bool DeSerialize(FILE* fp, uint8_t* data, size_t n) {
-  return fread(data, sizeof(*data), n, fp) == n;
-}
-
-bool DeSerialize(FILE* fp, uint16_t* data, size_t n) {
-  return fread(data, sizeof(*data), n, fp) == n;
-}
-
-bool DeSerialize(FILE* fp, uint32_t* data, size_t n) {
-  return fread(data, sizeof(*data), n, fp) == n;
-}
-
-bool Serialize(FILE* fp, const char* data, size_t n) {
-  return fwrite(data, sizeof(*data), n, fp) == n;
-}
-
-bool Serialize(FILE* fp, const float* data, size_t n) {
-  return fwrite(data, sizeof(*data), n, fp) == n;
-}
-
-bool Serialize(FILE* fp, const int8_t* data, size_t n) {
-  return fwrite(data, sizeof(*data), n, fp) == n;
-}
-
-bool Serialize(FILE* fp, const int16_t* data, size_t n) {
-  return fwrite(data, sizeof(*data), n, fp) == n;
-}
-
-bool Serialize(FILE* fp, const int32_t* data, size_t n) {
-  return fwrite(data, sizeof(*data), n, fp) == n;
-}
-
-bool Serialize(FILE* fp, const uint8_t* data, size_t n) {
-  return fwrite(data, sizeof(*data), n, fp) == n;
-}
-
-bool Serialize(FILE* fp, const uint16_t* data, size_t n) {
-  return fwrite(data, sizeof(*data), n, fp) == n;
-}
-
-bool Serialize(FILE* fp, const uint32_t* data, size_t n) {
-  return fwrite(data, sizeof(*data), n, fp) == n;
-}
-
 TFile::TFile()
-    : data_(nullptr),
-      offset_(0),
-      data_is_owned_(false),
-      is_writing_(false),
-      swap_(false) {}
+    : data_(nullptr), offset_(0), data_is_owned_(false), is_writing_(false), swap_(false) {}
 
 TFile::~TFile() {
-  if (data_is_owned_)
+  if (data_is_owned_) {
     delete data_;
+  }
 }
 
-bool TFile::DeSerialize(char* buffer, size_t count) {
-  return FRead(buffer, sizeof(*buffer), count) == count;
+bool TFile::DeSerializeSize(int32_t *pSize) {
+  uint32_t size;
+  if (FReadEndian(&size, sizeof(size), 1) != 1) {
+    return false;
+  }
+  if (size > data_->size() / 4) {
+    // Reverse endianness.
+    swap_ = !swap_;
+    ReverseN(&size, 4);
+  }
+  *pSize = size;
+  return true;
 }
 
-bool TFile::DeSerialize(double* buffer, size_t count) {
-  return FReadEndian(buffer, sizeof(*buffer), count) == count;
+bool TFile::DeSerializeSkip(size_t size) {
+  uint32_t len;
+  if (!DeSerialize(&len)) {
+    return false;
+  }
+  return Skip(len * size);
 }
 
-bool TFile::DeSerialize(float* buffer, size_t count) {
-  return FReadEndian(buffer, sizeof(*buffer), count) == count;
+bool TFile::DeSerialize(std::string &data) {
+  uint32_t size;
+  if (!DeSerialize(&size)) {
+    return false;
+  } else if (size > 0) {
+    // TODO: optimize.
+    data.resize(size);
+    return DeSerialize(&data[0], size);
+  }
+  data.clear();
+  return true;
 }
 
-bool TFile::DeSerialize(int8_t* buffer, size_t count) {
-  return FRead(buffer, sizeof(*buffer), count) == count;
+bool TFile::Serialize(const std::string &data) {
+  uint32_t size = data.size();
+  return Serialize(&size) && Serialize(data.c_str(), size);
 }
 
-bool TFile::DeSerialize(int16_t* buffer, size_t count) {
-  return FReadEndian(buffer, sizeof(*buffer), count) == count;
+bool TFile::DeSerialize(std::vector<char> &data) {
+  uint32_t size;
+  if (!DeSerialize(&size)) {
+    return false;
+  } else if (size > 0) {
+    // TODO: optimize.
+    data.resize(size);
+    return DeSerialize(&data[0], data.size());
+  }
+  data.clear();
+  return true;
 }
 
-bool TFile::DeSerialize(int32_t* buffer, size_t count) {
-  return FReadEndian(buffer, sizeof(*buffer), count) == count;
-}
-
-bool TFile::DeSerialize(int64_t* buffer, size_t count) {
-  return FReadEndian(buffer, sizeof(*buffer), count) == count;
-}
-
-bool TFile::DeSerialize(uint8_t* buffer, size_t count) {
-  return FRead(buffer, sizeof(*buffer), count) == count;
-}
-
-bool TFile::DeSerialize(uint16_t* buffer, size_t count) {
-  return FReadEndian(buffer, sizeof(*buffer), count) == count;
-}
-
-bool TFile::DeSerialize(uint32_t* buffer, size_t count) {
-  return FReadEndian(buffer, sizeof(*buffer), count) == count;
-}
-
-bool TFile::DeSerialize(uint64_t* buffer, size_t count) {
-  return FReadEndian(buffer, sizeof(*buffer), count) == count;
-}
-
-bool TFile::Serialize(const char* buffer, size_t count) {
-  return FWrite(buffer, sizeof(*buffer), count) == count;
-}
-
-bool TFile::Serialize(const double* buffer, size_t count) {
-  return FWrite(buffer, sizeof(*buffer), count) == count;
-}
-
-bool TFile::Serialize(const float* buffer, size_t count) {
-  return FWrite(buffer, sizeof(*buffer), count) == count;
-}
-
-bool TFile::Serialize(const int8_t* buffer, size_t count) {
-  return FWrite(buffer, sizeof(*buffer), count) == count;
-}
-
-bool TFile::Serialize(const int16_t* buffer, size_t count) {
-  return FWrite(buffer, sizeof(*buffer), count) == count;
-}
-
-bool TFile::Serialize(const int32_t* buffer, size_t count) {
-  return FWrite(buffer, sizeof(*buffer), count) == count;
-}
-
-bool TFile::Serialize(const int64_t* buffer, size_t count) {
-  return FWrite(buffer, sizeof(*buffer), count) == count;
-}
-
-bool TFile::Serialize(const uint8_t* buffer, size_t count) {
-  return FWrite(buffer, sizeof(*buffer), count) == count;
-}
-
-bool TFile::Serialize(const uint16_t* buffer, size_t count) {
-  return FWrite(buffer, sizeof(*buffer), count) == count;
-}
-
-bool TFile::Serialize(const uint32_t* buffer, size_t count) {
-  return FWrite(buffer, sizeof(*buffer), count) == count;
-}
-
-bool TFile::Serialize(const uint64_t* buffer, size_t count) {
-  return FWrite(buffer, sizeof(*buffer), count) == count;
+bool TFile::Serialize(const std::vector<char> &data) {
+  uint32_t size = data.size();
+  if (!Serialize(&size)) {
+    return false;
+  } else if (size > 0) {
+    return Serialize(&data[0], size);
+  }
+  return true;
 }
 
 bool TFile::Skip(size_t count) {
@@ -226,7 +137,7 @@ bool TFile::Skip(size_t count) {
   return true;
 }
 
-bool TFile::Open(const char* filename, FileReader reader) {
+bool TFile::Open(const char *filename, FileReader reader) {
   if (!data_is_owned_) {
     data_ = new std::vector<char>;
     data_is_owned_ = true;
@@ -234,13 +145,14 @@ bool TFile::Open(const char* filename, FileReader reader) {
   offset_ = 0;
   is_writing_ = false;
   swap_ = false;
-  if (reader == nullptr)
+  if (reader == nullptr) {
     return LoadDataFromFile(filename, data_);
-  else
+  } else {
     return (*reader)(filename, data_);
+  }
 }
 
-bool TFile::Open(const char* data, int size) {
+bool TFile::Open(const char *data, int size) {
   offset_ = 0;
   if (!data_is_owned_) {
     data_ = new std::vector<char>;
@@ -253,7 +165,7 @@ bool TFile::Open(const char* data, int size) {
   return true;
 }
 
-bool TFile::Open(FILE* fp, int64_t end_offset) {
+bool TFile::Open(FILE *fp, int64_t end_offset) {
   offset_ = 0;
   auto current_pos = std::ftell(fp);
   if (current_pos < 0) {
@@ -261,11 +173,13 @@ bool TFile::Open(FILE* fp, int64_t end_offset) {
     return false;
   }
   if (end_offset < 0) {
-    if (fseek(fp, 0, SEEK_END))
+    if (fseek(fp, 0, SEEK_END)) {
       return false;
+    }
     end_offset = ftell(fp);
-    if (fseek(fp, current_pos, SEEK_SET))
+    if (fseek(fp, current_pos, SEEK_SET)) {
       return false;
+    }
   }
   int size = end_offset - current_pos;
   is_writing_ = false;
@@ -278,21 +192,25 @@ bool TFile::Open(FILE* fp, int64_t end_offset) {
   return static_cast<int>(fread(&(*data_)[0], 1, size, fp)) == size;
 }
 
-char* TFile::FGets(char* buffer, int buffer_size) {
+char *TFile::FGets(char *buffer, int buffer_size) {
   ASSERT_HOST(!is_writing_);
   int size = 0;
   while (size + 1 < buffer_size && offset_ < data_->size()) {
     buffer[size++] = (*data_)[offset_++];
-    if ((*data_)[offset_ - 1] == '\n') break;
+    if ((*data_)[offset_ - 1] == '\n') {
+      break;
+    }
   }
-  if (size < buffer_size) buffer[size] = '\0';
+  if (size < buffer_size) {
+    buffer[size] = '\0';
+  }
   return size > 0 ? buffer : nullptr;
 }
 
-int TFile::FReadEndian(void* buffer, size_t size, int count) {
+int TFile::FReadEndian(void *buffer, size_t size, int count) {
   int num_read = FRead(buffer, size, count);
-  if (swap_) {
-    char* char_buffer = static_cast<char*>(buffer);
+  if (swap_ && size != 1) {
+    char *char_buffer = static_cast<char *>(buffer);
     for (int i = 0; i < num_read; ++i, char_buffer += size) {
       ReverseN(char_buffer, size);
     }
@@ -300,7 +218,7 @@ int TFile::FReadEndian(void* buffer, size_t size, int count) {
   return num_read;
 }
 
-int TFile::FRead(void* buffer, size_t size, int count) {
+int TFile::FRead(void *buffer, size_t size, int count) {
   ASSERT_HOST(!is_writing_);
   ASSERT_HOST(size > 0);
   ASSERT_HOST(count >= 0);
@@ -314,8 +232,9 @@ int TFile::FRead(void* buffer, size_t size, int count) {
       required_size = data_->size() - offset_;
     }
   }
-  if (required_size > 0 && buffer != nullptr)
+  if (required_size > 0 && buffer != nullptr) {
     memcpy(buffer, &(*data_)[offset_], required_size);
+  }
   offset_ += required_size;
   return required_size / size;
 }
@@ -325,10 +244,12 @@ void TFile::Rewind() {
   offset_ = 0;
 }
 
-void TFile::OpenWrite(std::vector<char>* data) {
+void TFile::OpenWrite(std::vector<char> *data) {
   offset_ = 0;
   if (data != nullptr) {
-    if (data_is_owned_) delete data_;
+    if (data_is_owned_) {
+      delete data_;
+    }
     data_ = data;
     data_is_owned_ = false;
   } else if (!data_is_owned_) {
@@ -337,29 +258,31 @@ void TFile::OpenWrite(std::vector<char>* data) {
   }
   is_writing_ = true;
   swap_ = false;
-  data_->resize(0);
+  data_->clear();
 }
 
-bool TFile::CloseWrite(const char* filename, FileWriter writer) {
+bool TFile::CloseWrite(const char *filename, FileWriter writer) {
   ASSERT_HOST(is_writing_);
-  if (writer == nullptr)
+  if (writer == nullptr) {
     return SaveDataToFile(*data_, filename);
-  else
+  } else {
     return (*writer)(*data_, filename);
+  }
 }
 
-int TFile::FWrite(const void* buffer, size_t size, int count) {
+int TFile::FWrite(const void *buffer, size_t size, int count) {
   ASSERT_HOST(is_writing_);
   ASSERT_HOST(size > 0);
   ASSERT_HOST(count >= 0);
   ASSERT_HOST(SIZE_MAX / size > count);
   size_t total = size * count;
-  const char* buf = static_cast<const char*>(buffer);
+  const char *buf = static_cast<const char *>(buffer);
   // This isn't very efficient, but memory is so fast compared to disk
   // that it is relatively unimportant, and very simple.
-  for (size_t i = 0; i < total; ++i)
+  for (size_t i = 0; i < total; ++i) {
     data_->push_back(buf[i]);
+  }
   return count;
 }
 
-}  // namespace tesseract.
+} // namespace tesseract.
