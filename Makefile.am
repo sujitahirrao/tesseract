@@ -9,6 +9,8 @@ ACLOCAL_AMFLAGS = -I m4
 
 CLEANFILES =
 
+DEFAULT_INCLUDES =
+
 SUBDIRS = . tessdata
 
 EXTRA_DIST = README.md LICENSE
@@ -792,10 +794,6 @@ training_CPPFLAGS += -I$(top_srcdir)/src/cutil
 training_CPPFLAGS += $(ICU_UC_CFLAGS) $(ICU_I18N_CFLAGS)
 training_CPPFLAGS += $(pango_CFLAGS)
 training_CPPFLAGS += $(cairo_CFLAGS)
-
-bin_SCRIPTS = src/training/language-specific.sh src/training/tesstrain.sh
-scripts_DATA = src/training/tesstrain_utils.sh
-scriptsdir = $(bindir)
 
 if DISABLED_LEGACY_ENGINE
 training_CPPFLAGS += -DDISABLED_LEGACY_ENGINE

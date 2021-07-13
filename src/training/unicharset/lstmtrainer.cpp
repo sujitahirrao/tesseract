@@ -65,9 +65,11 @@ const double kHighConfidence = 0.9375; // 15/16.
 const double kImprovementFraction = 15.0 / 16.0;
 // Fraction of last written best to make it worth writing another.
 const double kBestCheckpointFraction = 31.0 / 32.0;
+#ifndef GRAPHICS_DISABLED
 // Scale factor for display of target activations of CTC.
 const int kTargetXScale = 5;
 const int kTargetYScale = 100;
+#endif // !GRAPHICS_DISABLED
 
 LSTMTrainer::LSTMTrainer() : randomly_rotate_(false), training_data_(0), sub_trainer_(nullptr) {
   EmptyConstructor();
@@ -198,13 +200,16 @@ void LSTMTrainer::InitIterations() {
   worst_error_rate_ = 0.0;
   worst_iteration_ = 0;
   stall_iteration_ = kMinStallIterations;
+  best_error_history_.clear();
+  best_error_iterations_.clear();
   improvement_steps_ = kMinStallIterations;
   perfect_delay_ = 0;
   last_perfect_training_iteration_ = 0;
   for (int i = 0; i < ET_COUNT; ++i) {
     best_error_rates_[i] = 100.0;
     worst_error_rates_[i] = 0.0;
-    error_buffers_[i].resize(kRollingBufferSize_, 0.0);
+    error_buffers_[i].clear();
+    error_buffers_[i].resize(kRollingBufferSize_);
     error_rates_[i] = 100.0;
   }
   error_rate_of_last_saved_best_ = kMinStartedErrorRate;
@@ -665,8 +670,7 @@ int LSTMTrainer::ReduceLayerLearningRates(double factor, int num_samples,
   };
   std::vector<std::string> layers = EnumerateLayers();
   int num_layers = layers.size();
-  std::vector<int> num_weights;
-  num_weights.resize(num_layers, 0);
+  std::vector<int> num_weights(num_layers);
   std::vector<double> bad_sums[LR_COUNT];
   std::vector<double> ok_sums[LR_COUNT];
   for (int i = 0; i < LR_COUNT; ++i) {
@@ -1259,8 +1263,7 @@ double LSTMTrainer::ComputeWinnerError(const NetworkIO &deltas) {
 // Computes a very simple bag of chars char error rate.
 double LSTMTrainer::ComputeCharError(const std::vector<int> &truth_str,
                                      const std::vector<int> &ocr_str) {
-  std::vector<int> label_counts;
-  label_counts.resize(NumOutputs(), 0);
+  std::vector<int> label_counts(NumOutputs());
   int truth_size = 0;
   for (auto ch : truth_str) {
     if (ch != null_char_) {

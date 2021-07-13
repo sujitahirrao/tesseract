@@ -68,7 +68,7 @@ GENERIC_RELEASE=$GENERIC_MAJOR_VERSION.$GENERIC_MINOR_VERSION
 AC_SUBST([GENERIC_RELEASE])
 AC_SUBST([GENERIC_VERSION])
 
-AC_CONFIG_HEADERS([config_auto.h:config/config.h.in])
+AC_CONFIG_HEADERS([include/config_auto.h:config/config.h.in])
 
 # default conditional
 AM_CONDITIONAL([T_WIN], false)
@@ -261,7 +261,7 @@ AC_ARG_WITH([tensorflow],
 AM_CONDITIONAL([TENSORFLOW], false)
 TENSORFLOW_LIBS=
 AS_IF([test "x$with_tensorflow" != xno],
-  [AC_CHECK_HEADERS(["tensorflow/core/framework/graph.pb.h"],
+  [AC_CHECK_HEADERS([tensorflow/core/framework/graph.pb.h],
     [AC_SUBST([TENSORFLOW_LIBS], ["-lprotobuf -ltensorflow_cc"])
       AM_CONDITIONAL([TENSORFLOW], true)
     ],
@@ -529,9 +529,9 @@ if !($have_icu_uc && $have_icu_i18n); then
 fi
 
 # Check location of pango headers
-PKG_CHECK_MODULES([pango], [pango >= 1.22.0], [have_pango=true], [have_pango=false])
+PKG_CHECK_MODULES([pango], [pango >= 1.38.0], [have_pango=true], [have_pango=false])
 if !($have_pango); then
-        AC_MSG_WARN([pango 1.22.0 or higher is required, but was not found.])
+        AC_MSG_WARN([pango 1.38.0 or higher is required, but was not found.])
         AC_MSG_WARN([Training tools WILL NOT be built.])
         AC_MSG_WARN([Try to install libpango1.0-dev package.])
         AM_CONDITIONAL([ENABLE_TRAINING], false)
